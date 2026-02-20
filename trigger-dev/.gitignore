@@ -1,0 +1,9 @@
+node_modules/
+.trigger/
+dist/
+infra/
+.env
+.env.local
+.trigger-local
+.trigger-update-cache
+*.log
