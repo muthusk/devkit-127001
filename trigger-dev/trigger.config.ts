@@ -1,7 +1,7 @@
 import { defineConfig } from "@trigger.dev/sdk/v3";
 
 export default defineConfig({
-  project: "<project-ref>", // Replaced by `make init`
+  project: "proj-#########", // Replaced by `make init`
   runtime: "node",
   logLevel: "log",
   retries: {
@@ -14,4 +14,5 @@ export default defineConfig({
     },
   },
   dirs: ["src/trigger"],
+  maxDuration: 30000
 });

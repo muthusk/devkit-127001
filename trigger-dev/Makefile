@@ -67,13 +67,20 @@ worker-token: ## Show worker token from logs
 
 # ── Task project ─────────────────────────────
 
-init: ## Link task project (usage: make init PROJECT=proj_xxxxx)
+init: ## Set project ref in trigger.config.ts (usage: make init PROJECT=proj_xxxxx)
 ifndef PROJECT
 	@echo "❌ Usage: make init PROJECT=proj_xxxxx"
 	@echo "   Get your project ref from the dashboard at $(TRIGGER_URL)"
 	@exit 1
 endif
-	npx trigger.dev@$(CLI_VERSION) init -p $(PROJECT) -a $(TRIGGER_URL)
+	@if ! grep -q 'proj-#########' trigger.config.ts 2>/dev/null; then \
+	  echo "⚠️  trigger.config.ts already has a project ref set."; \
+	  echo "   Current value:"; \
+	  grep 'project:' trigger.config.ts; \
+	  read -p "   Overwrite? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 0; \
+	fi
+	@sed -i.bak 's|project: ".*"|project: "$(PROJECT)"|' trigger.config.ts && rm -f trigger.config.ts.bak
+	@echo "✅ Project ref set to $(PROJECT) in trigger.config.ts"
 
 dev: ## Run trigger dev watcher
 	npx trigger.dev@$(CLI_VERSION) dev -a $(TRIGGER_URL)
