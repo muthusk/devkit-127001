@@ -1,7 +1,7 @@
 import { task, queue, logger } from "@trigger.dev/sdk/v3";
 
 const eventQueue = queue({
-  id: "event-processing-queue",
+  name: "event-processing-queue",
   concurrencyLimit: 5,
 });
 

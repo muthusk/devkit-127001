@@ -26,7 +26,7 @@ export const approvalFlow = task({
     logger.info(`⏸️  Pausing for human approval (timeout: ${timeoutMinutes}m)`);
 
     const token = await wait.createToken({
-      id: `approval-${Date.now()}`,
+      idempotencyKey: `approval-${Date.now()}`,
       timeout: `${timeoutMinutes}m`,
       tags: ["approval", payload.requestedBy ?? "unknown"],
     });
@@ -81,7 +81,7 @@ export const multiStageApproval = task({
       logger.info(`Waiting for ${stage} approval...`);
 
       const token = await wait.createToken({
-        id: `approval-${stage}-${Date.now()}`,
+        idempotencyKey: `approval-${stage}-${Date.now()}`,
         timeout: "2h",
         tags: ["multi-approval", stage],
       });
