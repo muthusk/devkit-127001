@@ -9,6 +9,7 @@ TRIGGER_URL   := http://localhost:8030
 REGISTRY_HOST := localhost:5000
 REGISTRY_USER := registry-user
 VERSION_FILE  := .trigger-version
+CLI_VERSION   = $(shell cat $(VERSION_FILE) 2>/dev/null || echo "v4.3.3")
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -72,13 +73,13 @@ ifndef PROJECT
 	@echo "   Get your project ref from the dashboard at $(TRIGGER_URL)"
 	@exit 1
 endif
-	npx trigger.dev@latest init -p $(PROJECT) -a $(TRIGGER_URL)
+	npx trigger.dev@$(CLI_VERSION) init -p $(PROJECT) -a $(TRIGGER_URL)
 
 dev: ## Run trigger dev watcher
-	npx trigger.dev@latest dev -a $(TRIGGER_URL)
+	npx trigger.dev@$(CLI_VERSION) dev -a $(TRIGGER_URL)
 
 deploy: ## Deploy tasks to local instance
-	npx trigger.dev@latest deploy -a $(TRIGGER_URL)
+	npx trigger.dev@$(CLI_VERSION) deploy -a $(TRIGGER_URL)
 
 registry-login: ## Login to local Docker registry
 	@echo "🔐 Logging into local registry (password: very-secure-indeed)..."
@@ -95,11 +96,44 @@ clean: ## Stop infra, remove volumes (⚠️ destroys data)
 	$(COMPOSE_CMD) down -v
 	@echo "🧹 Cleaned up."
 
-nuke: ## Full wipe: containers, volumes, images, caches (☢️ nuclear)
-	@echo "☢️  This will destroy EVERYTHING: containers, volumes, Docker images, and caches."
-	@read -p "Are you absolutely sure? [y/N] " confirm && [ "$confirm" = "y" ] || exit 1
-	$(COMPOSE_CMD) down -v --rmi all --remove-orphans 2>/dev/null || true
-	@echo "🧹 Removing trigger-related Docker images..."
-	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -i 'trigger' | xargs -r docker rmi -f 2>/dev/null || true
-	@rm -rf node_modules .trigger dist .trigger-update-cache
-	@echo "☢️  Nuked. Run 'make setup && make up' to rebuild."
+nuke: ## Full wipe: containers, volumes, infra, caches. Optionally images. (☢️ nuclear)
+	@echo "☢️  This will destroy containers, volumes, infra, and caches."
+	@read -p "Are you absolutely sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo ""
+	@echo "  🛑 Stopping containers..."
+	@$(COMPOSE_CMD) down -v --remove-orphans 2>/dev/null \
+	  && echo "  ✅ Containers and volumes removed." \
+	  || echo "  ⚠️  Compose down failed (may already be stopped). Continuing..."
+	@echo ""
+	@echo "  🗑️  Remove trigger Docker images as well?"
+	@echo "     This frees disk but requires re-pulling on next 'make up'."
+	@read -p "  Type 'delete' to remove images, or press Enter to skip: " del_img; \
+	  if [ "$$del_img" = "delete" ]; then \
+	    images=$$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -i 'trigger' || true); \
+	    if [ -n "$$images" ]; then \
+	      echo "$$images" | while read img; do \
+	        printf "     Removing $$img... "; \
+	        docker rmi -f "$$img" 2>/dev/null && echo "done." || echo "failed (may be in use)."; \
+	      done; \
+	    else \
+	      echo "     No trigger images found."; \
+	    fi; \
+	  else \
+	    echo "  ⏭️  Skipping image removal."; \
+	  fi
+	@echo ""
+	@echo "  🧹 Removing local files..."
+	@for dir in infra node_modules .trigger dist; do \
+	  if [ -e "$$dir" ]; then \
+	    printf "     Removing $$dir/... "; \
+	    rm -rf "$$dir" && echo "done." || echo "failed."; \
+	  fi; \
+	done
+	@for f in .trigger-update-cache .trigger-version.bak; do \
+	  if [ -e "$$f" ]; then \
+	    printf "     Removing $$f... "; \
+	    rm -f "$$f" && echo "done." || echo "failed."; \
+	  fi; \
+	done
+	@echo ""
+	@echo "  ☢️  Nuked. Run 'make setup && make up' to rebuild from scratch."
