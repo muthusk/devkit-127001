@@ -1,0 +1,21 @@
+# Dependencies
+worker-ts/node_modules/
+worker-go/vendor/
+
+# Build artifacts
+worker-ts/dist/
+worker-go/worker
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment overrides (keep .env in repo for team sharing)
+.env.local
+.env.*.local

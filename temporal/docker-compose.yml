@@ -1,0 +1,129 @@
+services:
+  # ===========================================================================
+  # PostgreSQL — Temporal persistence backend
+  # ===========================================================================
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16}
+    container_name: temporal-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-temporal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-temporal}
+      POSTGRES_DB: ${POSTGRES_DB:-temporal}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-temporal}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - temporal-network
+
+  # ===========================================================================
+  # Temporal Server — auto-setup handles schema migration on first boot
+  # ===========================================================================
+  temporal-server:
+    image: temporalio/auto-setup:${TEMPORAL_VERSION:-latest}
+    container_name: temporal-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-temporal}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:-temporal}
+      - POSTGRES_SEEDS=postgres
+    ports:
+      - "${TEMPORAL_GRPC_PORT:-7233}:7233"
+      - "${TEMPORAL_HTTP_PORT:-7243}:7243" 
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address $(hostname):7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+    networks:
+      - temporal-network
+
+  # ===========================================================================
+  # Temporal Web UI
+  # ===========================================================================
+  temporal-ui:
+    image: temporalio/ui:${TEMPORAL_UI_VERSION:-latest}
+    container_name: temporal-ui
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "${TEMPORAL_UI_PORT:-8080}:8080"
+    networks:
+      - temporal-network
+
+  # ===========================================================================
+  # Temporal Admin Tools — CLI for seeding and operations
+  # ===========================================================================
+  temporal-admin-tools:
+    image: temporalio/admin-tools:${TEMPORAL_ADMIN_TOOLS_VERSION:-latest}
+    container_name: temporal-admin-tools
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - TEMPORAL_CLI_ADDRESS=temporal-server:7233
+    stdin_open: true
+    tty: true
+    networks:
+      - temporal-network
+
+  # ===========================================================================
+  # Go Worker — runs all 5 Go workflows
+  # ===========================================================================
+  worker-go:
+    build:
+      context: ./worker-go
+      dockerfile: Dockerfile
+    container_name: temporal-worker-go
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      - TEMPORAL_TASK_QUEUE=${GO_TASK_QUEUE:-go-task-queue}
+    restart: on-failure
+    networks:
+      - temporal-network
+
+  # ===========================================================================
+  # TypeScript Worker — runs all 5 TS workflows (slight variations)
+  # ===========================================================================
+  worker-ts:
+    build:
+      context: ./worker-ts
+      dockerfile: Dockerfile
+    container_name: temporal-worker-ts
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      - TEMPORAL_TASK_QUEUE=${TS_TASK_QUEUE:-ts-task-queue}
+    restart: on-failure
+    networks:
+      - temporal-network
+
+volumes:
+  temporal-postgres-data:
+    driver: local
+
+networks:
+  temporal-network:
+    driver: bridge

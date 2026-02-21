@@ -1,0 +1,27 @@
+{
+  "name": "temporal-worker-ts",
+  "version": "1.0.0",
+  "description": "Temporal TypeScript worker with example workflows",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/worker.js",
+    "dev": "ts-node src/worker.ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@temporalio/activity": "^1.11.0",
+    "@temporalio/client": "^1.11.0",
+    "@temporalio/common": "^1.11.0",
+    "@temporalio/worker": "^1.11.0",
+    "@temporalio/workflow": "^1.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "ts-node": "^10.9.0",
+    "jest": "^29.7.0",
+    "@jest/globals": "^29.7.0",
+    "ts-jest": "^29.1.0"
+  }
+}
