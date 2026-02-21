@@ -11,17 +11,17 @@ Self-hosted Trigger.dev v4 with Docker + preconfigured example tasks.
 ## Quick Start
 
 ```bash
-# 1. One-time setup (clones infra, installs deps)
-make setup
-
-# 2. Start everything
+# 1. Start everything (first run clones infra + installs deps)
 make up
 
-# 3. Get your magic login link (wait ~30-60s after startup)
+# 2. Get your magic login link (wait ~30-60s after startup)
 make logs-magic-link
 
-# 4. Open http://localhost:8030, sign in via magic link
+# 3. Open http://localhost:8030, sign in via magic link
 #    Create an organization and project in the UI
+
+# 4. Login CLI to local instance
+make login
 
 # 5. Link task project (pass project ref from dashboard)
 make init PROJECT=proj_xxxxx
@@ -40,22 +40,22 @@ make deploy
 
 | Command                | Description                                         |
 |------------------------|-----------------------------------------------------|
-| `make setup`           | One-time: clone infra + install deps                |
-| `make up`              | Start all infrastructure (checks for updates)       |
+| `make up`              | Start all infrastructure (first run: full setup)    |
 | `make down`            | Stop all infrastructure                             |
 | `make restart`         | Restart all infrastructure                          |
 | `make logs`            | Tail all container logs                             |
+| `make logs S="webapp"` | Tail specific container(s)                          |
 | `make logs-magic-link` | Watch for magic login links                         |
-| `make status`          | Show container status                               |
-| `make init PROJECT=x`  | Initialize task project against local instance      |
+| `make status`          | Show container status + health check                |
+| `make login`           | Login CLI to local Trigger.dev instance              |
+| `make init PROJECT=x`  | Set project ref in trigger.config.ts                |
 | `make dev`             | Run trigger dev watcher                             |
 | `make deploy`          | Deploy tasks to local instance                      |
 | `make registry-login`  | Login to the local Docker registry                  |
 | `make upgrade`         | Upgrade to latest Trigger.dev release               |
-| `make clean`           | Stop infra, remove volumes (⚠️ destroys data)       |
-| `make nuke`            | Full wipe: containers, volumes, images, caches (☢️)  |
-| `make health`          | Check webapp health endpoint                        |
 | `make worker-token`    | Show the worker token from logs                     |
+| `make clean`           | Stop infra, remove volumes (⚠️ destroys data)       |
+| `make nuke`            | Full wipe: containers, volumes, infra, caches (☢️)   |
 
 ## Update Checks
 
@@ -103,6 +103,10 @@ echo "UPDATE_CHECK=false" >> .trigger-local      # permanently (gitignored)
 │  │ Registry │ │ Socket Proxy │ │   MinIO     │ │
 │  │ :5000    │ │              │ │ :9000/:9001 │ │
 │  └──────────┘ └──────────────┘ └─────────────┘ │
+│  ┌──────────────┐ ┌───────────────┐            │
+│  │  ClickHouse  │ │  Electric SQL │            │
+│  │              │ │               │            │
+│  └──────────────┘ └───────────────┘            │
 └─────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────┐
@@ -124,6 +128,5 @@ echo "UPDATE_CHECK=false" >> .trigger-local      # permanently (gitignored)
 ```bash
 git clone <this-repo>
 cd devkit/trigger-dev
-make setup
 make up
 ```

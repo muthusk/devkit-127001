@@ -1,4 +1,4 @@
-.PHONY: setup up down restart logs logs-magic-link status init dev deploy \
+.PHONY: up down restart logs logs-magic-link status login init dev deploy \
         registry-login clean nuke upgrade health worker-token help
 
 COMPOSE_DIR   := infra/hosting/docker
@@ -15,14 +15,12 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-# ── Setup ────────────────────────────────────
-
-setup: ## One-time: clone infra + install deps
-	@./scripts/setup.sh
-
 # ── Infrastructure ───────────────────────────
 
-up: ## Start all infrastructure
+up: ## Start everything (first run: clones infra + installs deps)
+	@echo "🔧 Ensuring infrastructure prerequisites..."
+	@./scripts/setup.sh
+	@echo ""
 ifndef SKIP_UPDATE_CHECK
 	@./scripts/check-update.sh || true
 endif
@@ -30,7 +28,7 @@ endif
 	@$(COMPOSE_CMD) up -d || { \
 	  if [ -f .trigger-version.bak ]; then \
 	    echo ""; \
-	    echo "❌ Startup failed. Rolling back to $(cat .trigger-version.bak)..."; \
+	    echo "❌ Startup failed. Rolling back to $$(cat .trigger-version.bak)..."; \
 	    ./scripts/rollback.sh; \
 	    echo "Rolled back. Run 'make up' again."; \
 	  fi; \
@@ -38,28 +36,45 @@ endif
 	}
 	@rm -f .trigger-version.bak
 	@echo ""
-	@echo "✅ Infrastructure starting. Dashboard: $(TRIGGER_URL)"
-	@echo "   Run 'make logs-magic-link' to get your login link (wait ~30-60s)"
+	@./scripts/wait-for-webapp.sh $(TRIGGER_URL)/health 90
+	@echo ""
+	@echo "┌──────────────────────────────────────────────────┐"
+	@echo "│  ✅ Trigger.dev is running                       │"
+	@echo "├──────────────────────────────────────────────────┤"
+	@echo "│  Dashboard:  $(TRIGGER_URL)            │"
+	@echo "│  Registry:   $(REGISTRY_HOST)                 │"
+	@echo "│  MinIO:      http://localhost:9001              │"
+	@echo "├──────────────────────────────────────────────────┤"
+	@echo "│  Registry login:  $(REGISTRY_USER) / very-secure-indeed │"
+	@echo "│  MinIO login:     admin / very-safe-password    │"
+	@echo "├──────────────────────────────────────────────────┤"
+	@echo "│  Next: run 'make logs-magic-link' for login URL │"
+	@echo "└──────────────────────────────────────────────────┘"
 
 down: ## Stop all infrastructure
 	$(COMPOSE_CMD) down
 
 restart: ## Restart all infrastructure
 	$(COMPOSE_CMD) down
-	$(COMPOSE_CMD) up -d
+	@$(MAKE) up
 
-logs: ## Tail all container logs
+logs: ## Tail container logs (all, or S="webapp redis" for specific)
+ifdef S
+	$(COMPOSE_CMD) logs -f $(S)
+else
 	$(COMPOSE_CMD) logs -f
+endif
 
 logs-magic-link: ## Watch for magic login links
 	@echo "👀 Watching for magic link (Ctrl+C to stop)..."
 	$(COMPOSE_CMD) logs -f webapp 2>&1 | grep -i --line-buffered "magic\|login\|sign"
 
-status: ## Show container status
-	$(COMPOSE_CMD) ps
-
-health: ## Check webapp health
-	@curl -sf $(TRIGGER_URL)/health && echo " ✅ Webapp is healthy" || echo " ❌ Webapp not responding"
+status: ## Show container status + health check
+	@$(COMPOSE_CMD) ps
+	@echo ""
+	@curl -sf $(TRIGGER_URL)/health > /dev/null 2>&1 \
+	  && echo "🟢 Webapp: healthy" \
+	  || echo "🔴 Webapp: not responding"
 
 worker-token: ## Show worker token from logs
 	@echo "🔑 Looking for worker token..."
@@ -67,13 +82,16 @@ worker-token: ## Show worker token from logs
 
 # ── Task project ─────────────────────────────
 
+login: ## Login CLI to local Trigger.dev instance
+	npx trigger.dev@$(CLI_VERSION) login -a $(TRIGGER_URL)
+
 init: ## Set project ref in trigger.config.ts (usage: make init PROJECT=proj_xxxxx)
 ifndef PROJECT
 	@echo "❌ Usage: make init PROJECT=proj_xxxxx"
 	@echo "   Get your project ref from the dashboard at $(TRIGGER_URL)"
 	@exit 1
 endif
-	@if ! grep -q 'proj-#########' trigger.config.ts 2>/dev/null; then \
+	@if ! grep -q '<project-ref>' trigger.config.ts 2>/dev/null; then \
 	  echo "⚠️  trigger.config.ts already has a project ref set."; \
 	  echo "   Current value:"; \
 	  grep 'project:' trigger.config.ts; \
@@ -99,7 +117,7 @@ upgrade: ## Upgrade to latest Trigger.dev release
 
 clean: ## Stop infra, remove volumes (⚠️ destroys data)
 	@echo "⚠️  This will destroy ALL data (database, registry, object storage)."
-	@read -p "Are you sure? [y/N] " confirm && [ "$confirm" = "y" ] || exit 1
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
 	$(COMPOSE_CMD) down -v
 	@echo "🧹 Cleaned up."
 
@@ -143,4 +161,4 @@ nuke: ## Full wipe: containers, volumes, infra, caches. Optionally images. (☢�
 	  fi; \
 	done
 	@echo ""
-	@echo "  ☢️  Nuked. Run 'make setup && make up' to rebuild from scratch."
+	@echo "  ☢️  Nuked. Run 'make up' to rebuild from scratch."

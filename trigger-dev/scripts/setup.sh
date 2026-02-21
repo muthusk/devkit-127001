@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
+# Idempotent setup: clone infra, create .env, install deps.
+# Called by `make up` before starting infrastructure.
+# Safe to run repeatedly — skips steps that are already done.
 set -euo pipefail
 
 TRIGGER_VERSION="$(cat .trigger-version 2>/dev/null || echo "v4.3.3")"
 
-echo "🔧 Setting up Trigger.dev local dev (${TRIGGER_VERSION})..."
-
 # ── Clone infra (if needed) ──────────────────
-# Note: compose files live on main and aren't tagged per-release.
+# Compose files live on main and aren't tagged per-release.
 # Version pinning is done via TRIGGER_IMAGE_TAG in .env.
 if [ ! -d "infra/.git" ]; then
   echo "📦 Cloning Trigger.dev infrastructure (compose files from main)..."
@@ -16,12 +17,16 @@ if [ ! -d "infra/.git" ]; then
   git sparse-checkout set hosting/docker
   cd ..
 else
-  echo "📦 infra/ already exists, skipping clone."
-  echo "   To re-clone: rm -rf infra && make setup"
+  echo "✅ infra/ already present, skipping clone."
 fi
 
-# ── Create .env from example ─────────────────
+# ── Create .env from example (if needed) ─────
 if [ ! -f "infra/hosting/docker/.env" ]; then
+  if [ ! -f "infra/hosting/docker/.env.example" ]; then
+    echo "❌ infra/hosting/docker/.env.example not found."
+    echo "   Try removing infra/ and running 'make up' again."
+    exit 1
+  fi
   cp infra/hosting/docker/.env.example infra/hosting/docker/.env
   if grep -q "TRIGGER_IMAGE_TAG" infra/hosting/docker/.env; then
     sed -i.bak "s|^TRIGGER_IMAGE_TAG=.*|TRIGGER_IMAGE_TAG=${TRIGGER_VERSION}|" infra/hosting/docker/.env
@@ -32,12 +37,13 @@ if [ ! -f "infra/hosting/docker/.env" ]; then
   fi
   echo "📝 Created infra/hosting/docker/.env (pinned to ${TRIGGER_VERSION})"
 else
-  echo "📝 .env already exists, skipping."
+  echo "✅ .env already present, skipping."
 fi
 
-# ── Install npm deps ─────────────────────────
-echo "📦 Installing npm dependencies..."
-npm install
-
-echo ""
-echo "✅ Setup complete! Next: make up"
+# ── Install npm deps (if needed) ─────────────
+if [ ! -d "node_modules" ]; then
+  echo "📦 Installing npm dependencies..."
+  npm install
+else
+  echo "✅ node_modules/ already present, skipping install."
+fi
