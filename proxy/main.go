@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -16,8 +17,7 @@ import (
 type Route struct {
 	Name      string    `json:"name"`
 	Port      int       `json:"port"`
-	HealthURL string    `json:"healthURL"`
-	Path      string    `json:"path"`
+	Path      string    `json:"path,omitempty"`
 	Healthy   bool      `json:"healthy"`
 	LastCheck time.Time `json:"lastCheck"`
 }
@@ -71,7 +71,7 @@ func (s *State) persist() {
 func (s *State) Register(r *Route) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !strings.HasPrefix(r.Path, "/") {
+	if r.Path != "" && !strings.HasPrefix(r.Path, "/") {
 		r.Path = "/" + r.Path
 	}
 	s.routes[r.Name] = r
@@ -104,6 +104,9 @@ func (s *State) FindByPath(reqPath string) *Route {
 	defer s.mu.RUnlock()
 	var best *Route
 	for _, r := range s.routes {
+		if r.Path == "" {
+			continue
+		}
 		if strings.HasPrefix(reqPath, r.Path) {
 			if best == nil || len(r.Path) > len(best.Path) {
 				best = r
@@ -123,20 +126,19 @@ func (s *State) UpdateHealth(name string, healthy bool) {
 	s.persist()
 }
 
-func checkHealth(healthURL string) bool {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(healthURL)
+func checkHealth(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 2*time.Second)
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	conn.Close()
+	return true
 }
 
 func runHealthChecker(state *State, interval time.Duration) {
 	// Check immediately on startup
 	for _, r := range state.GetAll() {
-		healthy := checkHealth(r.HealthURL)
+		healthy := checkHealth(r.Port)
 		state.UpdateHealth(r.Name, healthy)
 		status := "unhealthy"
 		if healthy {
@@ -149,7 +151,7 @@ func runHealthChecker(state *State, interval time.Duration) {
 	defer ticker.Stop()
 	for range ticker.C {
 		for _, r := range state.GetAll() {
-			healthy := checkHealth(r.HealthURL)
+			healthy := checkHealth(r.Port)
 			state.UpdateHealth(r.Name, healthy)
 		}
 	}
@@ -166,21 +168,25 @@ func handleRegister(state *State) http.HandlerFunc {
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if route.Name == "" || route.Port == 0 || route.Path == "" {
-			http.Error(w, "name, port, and path are required", http.StatusBadRequest)
+		if route.Name == "" || route.Port == 0 {
+			http.Error(w, "name and port are required", http.StatusBadRequest)
 			return
 		}
 		state.Register(&route)
 
 		// Immediate health check in background
 		go func() {
-			healthy := checkHealth(route.HealthURL)
+			healthy := checkHealth(route.Port)
 			state.UpdateHealth(route.Name, healthy)
 			status := "unhealthy"
 			if healthy {
 				status = "healthy"
 			}
-			log.Printf("registered %s on port %d at %s (%s)", route.Name, route.Port, route.Path, status)
+			pathInfo := "(no proxy path)"
+			if route.Path != "" {
+				pathInfo = "at " + route.Path
+			}
+			log.Printf("registered %s on port %d %s (%s)", route.Name, route.Port, pathInfo, status)
 		}()
 
 		w.WriteHeader(http.StatusOK)
@@ -242,10 +248,10 @@ func handleDashboard(state *State, proxyPort string) http.HandlerFunc {
   <h1>devkit</h1>
 `)
 		if len(routes) == 0 {
-			fmt.Fprint(w, `  <div class="empty">No tools registered. Run <code>make up</code> in a tool directory to get started.</div>`)
+			fmt.Fprint(w, `  <div class="empty">No tools registered.</div>`)
 		} else {
 			fmt.Fprint(w, `  <table>
-    <tr><th>Tool</th><th>Port</th><th>Status</th><th>Last Checked</th></tr>
+    <tr><th>Tool</th><th>Port</th><th>Proxy Path</th><th>Status</th><th>Last Checked</th></tr>
 `)
 			for _, route := range routes {
 				status := `<span class="unhealthy">&#10008;</span>`
@@ -256,12 +262,34 @@ func handleDashboard(state *State, proxyPort string) http.HandlerFunc {
 				if !route.LastCheck.IsZero() {
 					lastCheck = route.LastCheck.Format("15:04:05")
 				}
-				link := fmt.Sprintf("http://localhost:%s%s", proxyPort, route.Path)
-				fmt.Fprintf(w, "    <tr><td><a href=\"%s\">%s</a></td><td>%d</td><td>%s</td><td>%s</td></tr>\n",
-					link, route.Name, route.Port, status, lastCheck)
+				var link, pathCol string
+				if route.Path != "" {
+					link = fmt.Sprintf("http://localhost:%s%s", proxyPort, route.Path)
+					pathCol = route.Path
+				} else {
+					link = fmt.Sprintf("http://localhost:%d", route.Port)
+					pathCol = "—"
+				}
+				fmt.Fprintf(w, "    <tr><td><a href=\"%s\">%s</a></td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+					link, route.Name, route.Port, pathCol, status, lastCheck)
 			}
 			fmt.Fprint(w, "  </table>\n")
 		}
+
+		fmt.Fprintf(w, `
+  <h2>API</h2>
+  <p><strong>Register</strong> (with proxy routing):</p>
+  <pre>curl -X POST http://localhost:%s/proxy/register \
+  -d '{"name":"myapp", "port":8080, "path":"/myapp"}'</pre>
+  <p><strong>Register</strong> (health monitor only, no proxy routing):</p>
+  <pre>curl -X POST http://localhost:%s/proxy/register \
+  -d '{"name":"postgres", "port":5432}'</pre>
+  <p><strong>Deregister:</strong></p>
+  <pre>curl -X POST http://localhost:%s/proxy/deregister \
+  -d '{"name":"myapp"}'</pre>
+  <p><small><strong>name</strong> and <strong>port</strong> are required. <strong>path</strong> is optional — when provided, the proxy routes <code>localhost:%s/&lt;path&gt;/*</code> to <code>localhost:&lt;port&gt;/*</code>.</small></p>
+`, proxyPort, proxyPort, proxyPort, proxyPort)
+
 		fmt.Fprint(w, "</body>\n</html>\n")
 	}
 }
