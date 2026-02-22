@@ -1,0 +1,63 @@
+services:
+  # ===========================================================================
+  # PostgreSQL — Keycloak persistence backend
+  # ===========================================================================
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: keycloak-postgres
+    environment:
+      POSTGRES_USER: ${KC_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${KC_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${KC_POSTGRES_DB}
+    ports:
+      - "${KEYCLOAK_POSTGRES_PORT}:5432"
+    volumes:
+      - keycloak-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KC_POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - keycloak-network
+
+  # ===========================================================================
+  # Keycloak — Identity and Access Management (dev mode)
+  # ===========================================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}
+    container_name: keycloak
+    command: start-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/${KC_POSTGRES_DB}
+      KC_DB_USERNAME: ${KC_POSTGRES_USER}
+      KC_DB_PASSWORD: ${KC_POSTGRES_PASSWORD}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: "${KC_CONTEXT_PATH}"
+    ports:
+      - "${KEYCLOAK_PORT}:8080"
+      - "${KEYCLOAK_HEALTH_PORT}:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/keycloak/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - keycloak-network
+
+volumes:
+  keycloak-postgres-data:
+    driver: local
+
+networks:
+  keycloak-network:
+    driver: bridge

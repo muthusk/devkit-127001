@@ -1,0 +1,9 @@
+[
+  {
+    "name": "keycloak",
+    "port": 8180,
+    "path": "/keycloak",
+    "healthy": true,
+    "lastCheck": "2026-02-21T23:58:15.211284-06:00"
+  }
+]
