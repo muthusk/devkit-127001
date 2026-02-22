@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-URL="${1:-http://localhost:8030/health}"
+URL="${1:-http://localhost:8030/healthcheck}"
 MAX_WAIT="${2:-120}"
 
 echo "⏳ Waiting for webapp at $URL (max ${MAX_WAIT}s)..."

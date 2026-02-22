@@ -1,11 +1,19 @@
+.DEFAULT_GOAL := help
+SHELL := /bin/bash
+
+# Load devkit .env
+include .env
+export
+
 .PHONY: up down restart logs logs-magic-link status login init dev deploy \
-        registry-login clean nuke upgrade health worker-token help
+        registry-login clean upgrade health worker-token help
 
 COMPOSE_DIR   := infra/hosting/docker
 COMPOSE_CMD   := docker compose \
   -f $(COMPOSE_DIR)/webapp/docker-compose.yml \
   -f $(COMPOSE_DIR)/worker/docker-compose.yml
-TRIGGER_URL   := http://localhost:8030
+FIND_PORT     := ../shared/scripts/find-port.sh
+TRIGGER_URL   := http://localhost:$(TRIGGER_PORT)
 REGISTRY_HOST := localhost:5000
 REGISTRY_USER := registry-user
 VERSION_FILE  := .trigger-version
@@ -24,6 +32,11 @@ up: ## Start everything (first run: clones infra + installs deps)
 ifndef SKIP_UPDATE_CHECK
 	@./scripts/check-update.sh || true
 endif
+	@# Best-effort port detection
+	@if [ -x "$(FIND_PORT)" ]; then \
+		TRIGGER_PORT=$$($(FIND_PORT) $(TRIGGER_PORT)); \
+		export TRIGGER_PORT; \
+	fi
 	@echo "🚀 Starting Trigger.dev infrastructure..."
 	@$(COMPOSE_CMD) up -d || { \
 	  if [ -f .trigger-version.bak ]; then \
@@ -36,7 +49,7 @@ endif
 	}
 	@rm -f .trigger-version.bak
 	@echo ""
-	@./scripts/wait-for-webapp.sh $(TRIGGER_URL)/health 90
+	@./scripts/wait-for-webapp.sh $(TRIGGER_URL)/healthcheck 90
 	@echo ""
 	@echo "┌──────────────────────────────────────────────────┐"
 	@echo "│  ✅ Trigger.dev is running                       │"
@@ -50,8 +63,17 @@ endif
 	@echo "├──────────────────────────────────────────────────┤"
 	@echo "│  Next: run 'make logs-magic-link' for login URL │"
 	@echo "└──────────────────────────────────────────────────┘"
+	@# Best-effort proxy registration
+	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/register \
+		-d '{"name":"trigger-dev","port":$(TRIGGER_PORT),"path":"$(TRIGGER_PROXY_PATH)"}' >/dev/null 2>&1 \
+		&& echo "   Proxy: http://localhost:$(PROXY_PORT)$(TRIGGER_PROXY_PATH)" \
+		|| echo "   Proxy not available. Register later with:" && \
+		   echo "   curl -X POST http://localhost:$(PROXY_PORT)/proxy/register -d '{\"name\":\"trigger-dev\",\"port\":$(TRIGGER_PORT),\"path\":\"$(TRIGGER_PROXY_PATH)\"}'"
 
 down: ## Stop all infrastructure
+	@# Best-effort proxy deregistration
+	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/deregister \
+		-d '{"name":"trigger-dev"}' >/dev/null 2>&1 || true
 	$(COMPOSE_CMD) down
 
 restart: ## Restart all infrastructure
@@ -72,7 +94,7 @@ logs-magic-link: ## Watch for magic login links
 status: ## Show container status + health check
 	@$(COMPOSE_CMD) ps
 	@echo ""
-	@curl -sf $(TRIGGER_URL)/health > /dev/null 2>&1 \
+	@curl -sf $(TRIGGER_URL)/healthcheck > /dev/null 2>&1 \
 	  && echo "🟢 Webapp: healthy" \
 	  || echo "🔴 Webapp: not responding"
 
@@ -115,25 +137,17 @@ registry-login: ## Login to local Docker registry
 upgrade: ## Upgrade to latest Trigger.dev release
 	@FORCE_UPGRADE=1 ./scripts/check-update.sh
 
-clean: ## Stop infra, remove volumes (⚠️ destroys data)
-	@echo "⚠️  This will destroy ALL data (database, registry, object storage)."
+clean: ## Remove containers, volumes, and local caches (optionally images)
+	@echo "⚠️  This will destroy ALL data (database, registry, object storage, caches)."
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	$(COMPOSE_CMD) down -v
-	@echo "🧹 Cleaned up."
-
-nuke: ## Full wipe: containers, volumes, infra, caches. Optionally images. (☢️ nuclear)
-	@echo "☢️  This will destroy containers, volumes, infra, and caches."
-	@read -p "Are you absolutely sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
 	@echo ""
 	@echo "  🛑 Stopping containers..."
 	@$(COMPOSE_CMD) down -v --remove-orphans 2>/dev/null \
 	  && echo "  ✅ Containers and volumes removed." \
 	  || echo "  ⚠️  Compose down failed (may already be stopped). Continuing..."
 	@echo ""
-	@echo "  🗑️  Remove trigger Docker images as well?"
-	@echo "     This frees disk but requires re-pulling on next 'make up'."
-	@read -p "  Type 'delete' to remove images, or press Enter to skip: " del_img; \
-	  if [ "$$del_img" = "delete" ]; then \
+	@read -p "  Also remove Docker images? [y/N] " del_img; \
+	  if [ "$$del_img" = "y" ]; then \
 	    images=$$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -i 'trigger' || true); \
 	    if [ -n "$$images" ]; then \
 	      echo "$$images" | while read img; do \
@@ -161,4 +175,4 @@ nuke: ## Full wipe: containers, volumes, infra, caches. Optionally images. (☢�
 	  fi; \
 	done
 	@echo ""
-	@echo "  ☢️  Nuked. Run 'make up' to rebuild from scratch."
+	@echo "✅ Cleaned up. Run 'make up' to rebuild from scratch."
