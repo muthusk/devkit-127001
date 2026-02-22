@@ -1,0 +1,10 @@
+[
+  {
+    "name": "persist-test",
+    "port": 8888,
+    "healthURL": "http://localhost:8888/health",
+    "path": "/persist",
+    "healthy": false,
+    "lastCheck": "2026-02-21T21:17:42.382008-06:00"
+  }
+]
