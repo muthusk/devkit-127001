@@ -15,11 +15,12 @@ import (
 )
 
 type Route struct {
-	Name      string    `json:"name"`
-	Port      int       `json:"port"`
-	Path      string    `json:"path,omitempty"`
-	Healthy   bool      `json:"healthy"`
-	LastCheck time.Time `json:"lastCheck"`
+	Name        string    `json:"name"`
+	Port        int       `json:"port"`
+	Path        string    `json:"path,omitempty"`
+	StripPrefix *bool     `json:"stripPrefix,omitempty"`
+	Healthy     bool      `json:"healthy"`
+	LastCheck   time.Time `json:"lastCheck"`
 }
 
 type State struct {
@@ -310,9 +311,12 @@ func proxyHandler(state *State) http.HandlerFunc {
 		originalDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
 			originalDirector(req)
-			req.URL.Path = strings.TrimPrefix(req.URL.Path, route.Path)
-			if req.URL.Path == "" {
-				req.URL.Path = "/"
+			// Strip prefix by default; skip when StripPrefix is explicitly false
+			if route.StripPrefix == nil || *route.StripPrefix {
+				req.URL.Path = strings.TrimPrefix(req.URL.Path, route.Path)
+				if req.URL.Path == "" {
+					req.URL.Path = "/"
+				}
 			}
 			req.URL.RawPath = ""
 		}

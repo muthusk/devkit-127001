@@ -2,9 +2,16 @@
   {
     "name": "persist-test",
     "port": 8888,
-    "healthURL": "http://localhost:8888/health",
     "path": "/persist",
     "healthy": false,
-    "lastCheck": "2026-02-21T21:27:42.376417-06:00"
+    "lastCheck": "2026-02-22T01:14:06.364843-06:00"
+  },
+  {
+    "name": "keycloak",
+    "port": 8180,
+    "path": "/keycloak",
+    "stripPrefix": false,
+    "healthy": true,
+    "lastCheck": "2026-02-22T01:14:06.367644-06:00"
   }
 ]

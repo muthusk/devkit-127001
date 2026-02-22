@@ -292,6 +292,41 @@ func TestProxyRouting(t *testing.T) {
 	}
 }
 
+func TestProxyRoutingNoStripPrefix(t *testing.T) {
+	// Start an upstream HTTP server
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "upstream:%s", r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	upstreamPort := 0
+	fmt.Sscanf(upstream.URL, "http://127.0.0.1:%d", &upstreamPort)
+	if upstreamPort == 0 {
+		t.Fatalf("could not parse upstream port from %s", upstream.URL)
+	}
+
+	state := newTestState(t)
+	noStrip := false
+	state.Register(&Route{Name: "kc", Port: upstreamPort, Path: "/keycloak", StripPrefix: &noStrip})
+
+	ts := httptest.NewServer(testMux(state, "7001"))
+	defer ts.Close()
+
+	// Request through the proxy — path should NOT be stripped
+	resp, err := http.Get(ts.URL + "/keycloak/admin/master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Upstream should see /keycloak/admin/master (prefix preserved)
+	expected := "upstream:/keycloak/admin/master"
+	if string(body) != expected {
+		t.Fatalf("expected %q, got %q", expected, string(body))
+	}
+}
+
 func TestProxyNoRouteMatch(t *testing.T) {
 	state := newTestState(t)
 	ts := httptest.NewServer(testMux(state, "7001"))
