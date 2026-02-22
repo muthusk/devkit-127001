@@ -47,16 +47,16 @@ up: ## Start all services (builds workers if needed)
 	@echo ""
 	@echo "Run 'make seed' to trigger example workflows."
 	@# Best-effort proxy registration
-	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/register \
-		-d '{"name":"temporal","port":$(TEMPORAL_UI_PORT),"path":"$(TEMPORAL_PROXY_PATH)"}' >/dev/null 2>&1 \
-		&& echo "   Proxy: http://localhost:$(PROXY_PORT)$(TEMPORAL_PROXY_PATH)" \
+	@curl -sf -X POST https://home.dev.kit/proxy/register \
+		-d '{"name":"temporal","port":$(TEMPORAL_UI_PORT)}' >/dev/null 2>&1 \
+		&& echo "   Proxy: https://temporal.dev.kit" \
 		|| echo "   Proxy not available. Register later with:" && \
-		   echo "   curl -X POST http://localhost:$(PROXY_PORT)/proxy/register -d '{\"name\":\"temporal\",\"port\":$(TEMPORAL_UI_PORT),\"path\":\"$(TEMPORAL_PROXY_PATH)\"}'"
+		   echo "   curl -X POST https://home.dev.kit/proxy/register -d '{\"name\":\"temporal\",\"port\":$(TEMPORAL_UI_PORT)}'"
 
 .PHONY: down
 down: ## Graceful shutdown (preserves volumes)
 	@# Best-effort proxy deregistration
-	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/deregister \
+	@curl -sf -X POST https://home.dev.kit/proxy/deregister \
 		-d '{"name":"temporal"}' >/dev/null 2>&1 || true
 	$(COMPOSE) down
 	@echo "✅ Environment stopped."

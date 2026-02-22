@@ -1,3 +1,6 @@
 .DS_Store
 *.log
+*.pem
 devkit-proxy*.*
+state.json
+cert/

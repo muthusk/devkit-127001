@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@trigger.dev/sdk": "^4.3.3"
+    "@trigger.dev/sdk": "4.3.3"
   },
   "devDependencies": {
-    "@trigger.dev/build": "^4.3.3",
+    "@trigger.dev/build": "4.3.3",
     "@types/node": "^20.0.0",
     "typescript": "^5.5.0"
   }

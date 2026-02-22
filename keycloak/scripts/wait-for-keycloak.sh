@@ -7,7 +7,7 @@ set -euo pipefail
 
 MAX_RETRIES=60
 RETRY_INTERVAL=3
-KEYCLOAK_URL="http://localhost:${KEYCLOAK_HEALTH_PORT:-9100}/keycloak/health/ready"
+KEYCLOAK_URL="http://localhost:${KEYCLOAK_HEALTH_PORT:-9100}/health/ready"
 
 echo "Waiting for Keycloak at ${KEYCLOAK_URL}..."
 

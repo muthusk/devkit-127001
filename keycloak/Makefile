@@ -40,22 +40,22 @@ up: ## Start Keycloak and Postgres
 	@./scripts/disable-ssl.sh
 	@echo ""
 	@echo "✅ Keycloak is ready!"
-	@echo "   Admin Console: http://localhost:$(KEYCLOAK_PORT)$(KC_CONTEXT_PATH)"
+	@echo "   Admin Console: http://localhost:$(KEYCLOAK_PORT)"
 	@echo "   Username:      $(KC_BOOTSTRAP_ADMIN_USERNAME)"
 	@echo "   Password:      $(KC_BOOTSTRAP_ADMIN_PASSWORD)"
 	@echo ""
 	@echo "Run 'make seed' to create sample realm, client, and users."
-	@# Best-effort proxy registration (stripPrefix=false so /keycloak is forwarded as-is)
-	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/register \
-		-d '{"name":"keycloak","port":$(KEYCLOAK_PORT),"path":"$(KC_CONTEXT_PATH)","stripPrefix":false}' >/dev/null 2>&1 \
-		&& echo "   Proxy: http://localhost:$(PROXY_PORT)$(KC_CONTEXT_PATH)" \
+	@# Best-effort proxy registration
+	@curl -sf -X POST https://home.dev.kit/proxy/register \
+		-d '{"name":"keycloak","port":$(KEYCLOAK_PORT)}' >/dev/null 2>&1 \
+		&& echo "   Proxy: https://keycloak.dev.kit" \
 		|| echo "   Proxy not available. Register later with:" && \
-		   echo "   curl -X POST http://localhost:$(PROXY_PORT)/proxy/register -d '{\"name\":\"keycloak\",\"port\":$(KEYCLOAK_PORT),\"path\":\"$(KC_CONTEXT_PATH)\",\"stripPrefix\":false}'"
+		   echo "   curl -X POST https://home.dev.kit/proxy/register -d '{\"name\":\"keycloak\",\"port\":$(KEYCLOAK_PORT)}'"
 
 .PHONY: down
 down: ## Graceful shutdown (preserves volumes)
 	@# Best-effort proxy deregistration
-	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/deregister \
+	@curl -sf -X POST https://home.dev.kit/proxy/deregister \
 		-d '{"name":"keycloak"}' >/dev/null 2>&1 || true
 	$(COMPOSE) down
 	@echo "✅ Environment stopped."
@@ -70,7 +70,7 @@ status: ## Check health of all services
 	@$(COMPOSE) ps
 	@echo ""
 	@echo "--- Keycloak Health ---"
-	@curl -sf http://localhost:$(KEYCLOAK_HEALTH_PORT)$(KC_CONTEXT_PATH)/health/ready >/dev/null 2>&1 \
+	@curl -sf http://localhost:$(KEYCLOAK_HEALTH_PORT)/health/ready >/dev/null 2>&1 \
 		&& echo "✅ Keycloak is healthy" \
 		|| echo "❌ Keycloak is unhealthy or not running"
 

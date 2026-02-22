@@ -29,22 +29,35 @@ func newTestState(t *testing.T) *State {
 	return NewState(tempStateFile(t))
 }
 
-func testMux(state *State, port string) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/proxy/register", handleRegister(state))
-	mux.HandleFunc("/proxy/deregister", handleDeregister(state))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			handleDashboard(state, port)(w, r)
-			return
-		}
-		proxyHandler(state)(w, r)
-	})
-	return mux
+func testServer(state *State) *httptest.Server {
+	return httptest.NewServer(rootHandler(state))
 }
 
-func postJSON(ts *httptest.Server, path string, body string) (*http.Response, string) {
-	resp, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body))
+// postJSONWithHost sends a POST to the test server with a custom Host header.
+func postJSONWithHost(ts *httptest.Server, path, host, body string) (*http.Response, string) {
+	req, err := http.NewRequest(http.MethodPost, ts.URL+path, strings.NewReader(body))
+	if err != nil {
+		return nil, ""
+	}
+	req.Host = host
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, ""
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, string(b)
+}
+
+// getWithHost sends a GET to the test server with a custom Host header.
+func getWithHost(ts *httptest.Server, path, host string) (*http.Response, string) {
+	req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+	if err != nil {
+		return nil, ""
+	}
+	req.Host = host
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, ""
 	}
@@ -55,10 +68,10 @@ func postJSON(ts *httptest.Server, path string, body string) (*http.Response, st
 
 func TestRegister(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	resp, body := postJSON(ts, "/proxy/register", `{"name":"web","port":8080,"path":"/web"}`)
+	resp, body := postJSONWithHost(ts, "/proxy/register", "home.dev.kit", `{"name":"web","port":8080}`)
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -67,43 +80,24 @@ func TestRegister(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatalf("expected 1 route, got %d", len(routes))
 	}
-	if routes[0].Name != "web" || routes[0].Port != 8080 || routes[0].Path != "/web" {
+	if routes[0].Name != "web" || routes[0].Port != 8080 {
 		t.Fatalf("unexpected route: %+v", routes[0])
-	}
-}
-
-func TestRegisterWithoutPath(t *testing.T) {
-	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
-	defer ts.Close()
-
-	resp, body := postJSON(ts, "/proxy/register", `{"name":"postgres","port":5432}`)
-	if resp.StatusCode != 200 {
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
-	}
-
-	routes := state.GetAll()
-	if len(routes) != 1 {
-		t.Fatalf("expected 1 route, got %d", len(routes))
-	}
-	if routes[0].Path != "" {
-		t.Fatalf("expected empty path, got %q", routes[0].Path)
 	}
 }
 
 func TestRegisterValidation(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
 	// Missing name
-	resp, _ := postJSON(ts, "/proxy/register", `{"port":8080}`)
+	resp, _ := postJSONWithHost(ts, "/proxy/register", "home.dev.kit", `{"port":8080}`)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400 for missing name, got %d", resp.StatusCode)
 	}
 
 	// Missing port
-	resp, _ = postJSON(ts, "/proxy/register", `{"name":"test"}`)
+	resp, _ = postJSONWithHost(ts, "/proxy/register", "home.dev.kit", `{"name":"test"}`)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400 for missing port, got %d", resp.StatusCode)
 	}
@@ -111,12 +105,13 @@ func TestRegisterValidation(t *testing.T) {
 
 func TestDeregister(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	postJSON(ts, "/proxy/register", `{"name":"web","port":8080,"path":"/web"}`)
+	postJSONWithHost(ts, "/proxy/register", "home.dev.kit", `{"name":"web","port":8080}`)
+	time.Sleep(100 * time.Millisecond) // let background health check goroutine finish
 
-	resp, _ := postJSON(ts, "/proxy/deregister", `{"name":"web"}`)
+	resp, _ := postJSONWithHost(ts, "/proxy/deregister", "home.dev.kit", `{"name":"web"}`)
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -129,10 +124,10 @@ func TestDeregister(t *testing.T) {
 
 func TestDeregisterNotFound(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	resp, _ := postJSON(ts, "/proxy/deregister", `{"name":"nope"}`)
+	resp, _ := postJSONWithHost(ts, "/proxy/deregister", "home.dev.kit", `{"name":"nope"}`)
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
@@ -140,16 +135,13 @@ func TestDeregisterNotFound(t *testing.T) {
 
 func TestDashboardEmpty(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/")
-	if err != nil {
-		t.Fatal(err)
+	resp, html := getWithHost(ts, "/", "home.dev.kit")
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	html := string(body)
 
 	if !strings.Contains(html, "No tools registered") {
 		t.Fatal("expected empty state message")
@@ -161,20 +153,14 @@ func TestDashboardEmpty(t *testing.T) {
 
 func TestDashboardWithRoutes(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	postJSON(ts, "/proxy/register", `{"name":"myapp","port":9090,"path":"/myapp"}`)
+	postJSONWithHost(ts, "/proxy/register", "home.dev.kit", `{"name":"myapp","port":9090}`)
 	// Let background health check goroutine finish
 	time.Sleep(100 * time.Millisecond)
 
-	resp, err := http.Get(ts.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	html := string(body)
+	_, html := getWithHost(ts, "/", "home.dev.kit")
 
 	if !strings.Contains(html, "myapp") {
 		t.Fatal("expected tool name on dashboard")
@@ -182,58 +168,26 @@ func TestDashboardWithRoutes(t *testing.T) {
 	if !strings.Contains(html, "9090") {
 		t.Fatal("expected port on dashboard")
 	}
-	if !strings.Contains(html, "/myapp") {
-		t.Fatal("expected proxy path on dashboard")
-	}
-}
-
-func TestDashboardWithPathlessRoute(t *testing.T) {
-	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
-	defer ts.Close()
-
-	postJSON(ts, "/proxy/register", `{"name":"postgres","port":5432}`)
-	time.Sleep(100 * time.Millisecond)
-
-	resp, err := http.Get(ts.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	html := string(body)
-
-	// Should link directly to the port, not through proxy
-	if !strings.Contains(html, "localhost:5432") {
-		t.Fatal("expected direct link to port for pathless route")
-	}
-	// Path column should show dash
-	if !strings.Contains(html, "\xe2\x80\x94") { // em dash
-		t.Fatal("expected dash in path column for pathless route")
+	if !strings.Contains(html, "https://myapp.dev.kit") {
+		t.Fatal("expected subdomain URL on dashboard")
 	}
 }
 
 func TestDashboardAPIDocumentation(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	html := string(body)
+	_, html := getWithHost(ts, "/", "home.dev.kit")
 
-	if !strings.Contains(html, "/proxy/register") {
+	if !strings.Contains(html, "https://home.dev.kit/proxy/register") {
 		t.Fatal("expected register endpoint in API docs")
 	}
-	if !strings.Contains(html, "/proxy/deregister") {
+	if !strings.Contains(html, "https://home.dev.kit/proxy/deregister") {
 		t.Fatal("expected deregister endpoint in API docs")
 	}
-	if !strings.Contains(html, "health monitor only") {
-		t.Fatal("expected pathless registration example in API docs")
+	if !strings.Contains(html, `https://&lt;name&gt;.dev.kit`) {
+		t.Fatal("expected subdomain pattern in API docs")
 	}
 }
 
@@ -257,7 +211,7 @@ func TestHealthCheckTCP(t *testing.T) {
 	}
 }
 
-func TestProxyRouting(t *testing.T) {
+func TestSubdomainProxy(t *testing.T) {
 	// Start an upstream HTTP server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "upstream:%s", r.URL.Path)
@@ -272,28 +226,25 @@ func TestProxyRouting(t *testing.T) {
 	}
 
 	state := newTestState(t)
-	state.Register(&Route{Name: "app", Port: upstreamPort, Path: "/app"})
+	state.Register(&Route{Name: "app", Port: upstreamPort})
 
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	// Request through the proxy
-	resp, err := http.Get(ts.URL + "/app/hello")
-	if err != nil {
-		t.Fatal(err)
+	// Request through the proxy with subdomain host
+	resp, body := getWithHost(ts, "/hello", "app.dev.kit")
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
 
-	// Upstream should see /hello (prefix /app stripped)
+	// Upstream should see /hello (path passed through unchanged)
 	expected := "upstream:/hello"
-	if string(body) != expected {
-		t.Fatalf("expected %q, got %q", expected, string(body))
+	if body != expected {
+		t.Fatalf("expected %q, got %q", expected, body)
 	}
 }
 
-func TestProxyRoutingNoStripPrefix(t *testing.T) {
-	// Start an upstream HTTP server
+func TestSubdomainProxyRootPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "upstream:%s", r.URL.Path)
 	}))
@@ -301,64 +252,123 @@ func TestProxyRoutingNoStripPrefix(t *testing.T) {
 
 	upstreamPort := 0
 	fmt.Sscanf(upstream.URL, "http://127.0.0.1:%d", &upstreamPort)
-	if upstreamPort == 0 {
-		t.Fatalf("could not parse upstream port from %s", upstream.URL)
-	}
 
 	state := newTestState(t)
-	noStrip := false
-	state.Register(&Route{Name: "kc", Port: upstreamPort, Path: "/keycloak", StripPrefix: &noStrip})
+	state.Register(&Route{Name: "app", Port: upstreamPort})
 
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	// Request through the proxy — path should NOT be stripped
-	resp, err := http.Get(ts.URL + "/keycloak/admin/master")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-
-	// Upstream should see /keycloak/admin/master (prefix preserved)
-	expected := "upstream:/keycloak/admin/master"
-	if string(body) != expected {
-		t.Fatalf("expected %q, got %q", expected, string(body))
+	_, body := getWithHost(ts, "/", "app.dev.kit")
+	expected := "upstream:/"
+	if body != expected {
+		t.Fatalf("expected %q, got %q", expected, body)
 	}
 }
 
 func TestProxyNoRouteMatch(t *testing.T) {
 	state := newTestState(t)
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/nonexistent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
+	resp, _ := getWithHost(ts, "/anything", "nonexistent.dev.kit")
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestProxySkipsPathlessRoutes(t *testing.T) {
+func TestBadHostHeader(t *testing.T) {
 	state := newTestState(t)
-	state.Register(&Route{Name: "db", Port: 5432})
-
-	ts := httptest.NewServer(testMux(state, "7001"))
+	ts := testServer(state)
 	defer ts.Close()
 
-	// Even though "db" is registered, it has no path — should not proxy
-	resp, err := http.Get(ts.URL + "/db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
+	// Host that doesn't match *.dev.kit pattern
+	resp, _ := getWithHost(ts, "/", "example.com")
 	if resp.StatusCode != 404 {
-		t.Fatalf("expected 404 for pathless route, got %d", resp.StatusCode)
+		t.Fatalf("expected 404 for non-devkit host, got %d", resp.StatusCode)
+	}
+}
+
+func TestHomeDomainDashboard(t *testing.T) {
+	state := newTestState(t)
+	ts := testServer(state)
+	defer ts.Close()
+
+	// home.dev.kit serves dashboard
+	resp, html := getWithHost(ts, "/", "home.dev.kit")
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(html, "<title>devkit</title>") {
+		t.Fatal("expected dashboard HTML")
+	}
+}
+
+func TestHomeDomainRegister(t *testing.T) {
+	state := newTestState(t)
+	ts := testServer(state)
+	defer ts.Close()
+
+	// Registration works on home.dev.kit
+	resp, body := postJSONWithHost(ts, "/proxy/register", "home.dev.kit", `{"name":"svc","port":3000}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	if state.FindByName("svc") == nil {
+		t.Fatal("expected route to be registered")
+	}
+	time.Sleep(100 * time.Millisecond) // let background health check goroutine finish
+}
+
+func TestHomeDomainWithPort(t *testing.T) {
+	state := newTestState(t)
+	ts := testServer(state)
+	defer ts.Close()
+
+	// home.dev.kit:7443 should still match (port stripped)
+	resp, html := getWithHost(ts, "/", "home.dev.kit:7443")
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(html, "<title>devkit</title>") {
+		t.Fatal("expected dashboard HTML with port in host")
+	}
+}
+
+func TestRequestCounter(t *testing.T) {
+	// Start an upstream HTTP server
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "ok")
+	}))
+	defer upstream.Close()
+
+	upstreamPort := 0
+	fmt.Sscanf(upstream.URL, "http://127.0.0.1:%d", &upstreamPort)
+
+	state := newTestState(t)
+	state.Register(&Route{Name: "counter-test", Port: upstreamPort})
+
+	ts := testServer(state)
+	defer ts.Close()
+
+	// Send 3 requests through the proxy
+	for i := 0; i < 3; i++ {
+		getWithHost(ts, "/", "counter-test.dev.kit")
+	}
+
+	route := state.FindByName("counter-test")
+	if route == nil {
+		t.Fatal("expected route to exist")
+	}
+	if route.Requests != 3 {
+		t.Fatalf("expected 3 requests, got %d", route.Requests)
+	}
+
+	// Dashboard should show the count
+	_, html := getWithHost(ts, "/", "home.dev.kit")
+	if !strings.Contains(html, ">3<") {
+		t.Fatal("expected request count of 3 on dashboard")
 	}
 }
 
@@ -367,7 +377,7 @@ func TestStatePersistence(t *testing.T) {
 
 	// Create state and register a route
 	s1 := NewState(stateFile)
-	s1.Register(&Route{Name: "persist-test", Port: 3000, Path: "/persist"})
+	s1.Register(&Route{Name: "persist-test", Port: 3000})
 
 	// Create a new state from the same file
 	s2 := NewState(stateFile)
@@ -376,7 +386,7 @@ func TestStatePersistence(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatalf("expected 1 persisted route, got %d", len(routes))
 	}
-	if routes[0].Name != "persist-test" || routes[0].Port != 3000 || routes[0].Path != "/persist" {
+	if routes[0].Name != "persist-test" || routes[0].Port != 3000 {
 		t.Fatalf("unexpected persisted route: %+v", routes[0])
 	}
 }
@@ -384,7 +394,7 @@ func TestStatePersistence(t *testing.T) {
 func TestStateFileFormat(t *testing.T) {
 	stateFile := tempStateFile(t)
 	state := NewState(stateFile)
-	state.Register(&Route{Name: "test", Port: 8080, Path: "/test"})
+	state.Register(&Route{Name: "test", Port: 8080})
 
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
@@ -400,8 +410,11 @@ func TestStateFileFormat(t *testing.T) {
 		t.Fatalf("expected 1 route in JSON, got %d", len(routes))
 	}
 
-	// healthURL should not be present
-	if _, ok := routes[0]["healthURL"]; ok {
-		t.Fatal("state file should not contain healthURL field")
+	// path and stripPrefix should not be present
+	if _, ok := routes[0]["path"]; ok {
+		t.Fatal("state file should not contain path field")
+	}
+	if _, ok := routes[0]["stripPrefix"]; ok {
+		t.Fatal("state file should not contain stripPrefix field")
 	}
 }

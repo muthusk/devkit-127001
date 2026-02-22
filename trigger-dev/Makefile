@@ -20,7 +20,7 @@ VERSION_FILE  := .trigger-version
 CLI_VERSION   = $(shell cat $(VERSION_FILE) 2>/dev/null || echo "v4.3.3")
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # ── Infrastructure ───────────────────────────
@@ -64,15 +64,15 @@ endif
 	@echo "│  Next: run 'make logs-magic-link' for login URL │"
 	@echo "└──────────────────────────────────────────────────┘"
 	@# Best-effort proxy registration
-	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/register \
-		-d '{"name":"trigger-dev","port":$(TRIGGER_PORT),"path":"$(TRIGGER_PROXY_PATH)"}' >/dev/null 2>&1 \
-		&& echo "   Proxy: http://localhost:$(PROXY_PORT)$(TRIGGER_PROXY_PATH)" \
+	@curl -sf -X POST https://home.dev.kit/proxy/register \
+		-d '{"name":"trigger-dev","port":$(TRIGGER_PORT)}' >/dev/null 2>&1 \
+		&& echo "   Proxy: https://trigger-dev.dev.kit" \
 		|| echo "   Proxy not available. Register later with:" && \
-		   echo "   curl -X POST http://localhost:$(PROXY_PORT)/proxy/register -d '{\"name\":\"trigger-dev\",\"port\":$(TRIGGER_PORT),\"path\":\"$(TRIGGER_PROXY_PATH)\"}'"
+		   echo "   curl -X POST https://home.dev.kit/proxy/register -d '{\"name\":\"trigger-dev\",\"port\":$(TRIGGER_PORT)}'"
 
 down: ## Stop all infrastructure
 	@# Best-effort proxy deregistration
-	@curl -sf -X POST http://localhost:$(PROXY_PORT)/proxy/deregister \
+	@curl -sf -X POST https://home.dev.kit/proxy/deregister \
 		-d '{"name":"trigger-dev"}' >/dev/null 2>&1 || true
 	$(COMPOSE_CMD) down
 

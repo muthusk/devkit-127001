@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,18 +10,20 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
 type Route struct {
-	Name        string    `json:"name"`
-	Port        int       `json:"port"`
-	Path        string    `json:"path,omitempty"`
-	StripPrefix *bool     `json:"stripPrefix,omitempty"`
-	Healthy     bool      `json:"healthy"`
-	LastCheck   time.Time `json:"lastCheck"`
+	Name      string    `json:"name"`
+	Port      int       `json:"port"`
+	Healthy   bool      `json:"healthy"`
+	LastCheck time.Time `json:"lastCheck"`
+	Requests  int64     `json:"-"` // in-memory only, not persisted
 }
 
 type State struct {
@@ -41,6 +44,7 @@ func NewState(file string) *State {
 func (s *State) load() {
 	data, err := os.ReadFile(s.file)
 	if err != nil {
+		log.Printf("no state file found — starting fresh")
 		return
 	}
 	var routes []*Route
@@ -72,9 +76,6 @@ func (s *State) persist() {
 func (s *State) Register(r *Route) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if r.Path != "" && !strings.HasPrefix(r.Path, "/") {
-		r.Path = "/" + r.Path
-	}
 	s.routes[r.Name] = r
 	s.persist()
 }
@@ -100,21 +101,10 @@ func (s *State) GetAll() []*Route {
 	return routes
 }
 
-func (s *State) FindByPath(reqPath string) *Route {
+func (s *State) FindByName(name string) *Route {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var best *Route
-	for _, r := range s.routes {
-		if r.Path == "" {
-			continue
-		}
-		if strings.HasPrefix(reqPath, r.Path) {
-			if best == nil || len(r.Path) > len(best.Path) {
-				best = r
-			}
-		}
-	}
-	return best
+	return s.routes[name]
 }
 
 func (s *State) UpdateHealth(name string, healthy bool) {
@@ -183,11 +173,7 @@ func handleRegister(state *State) http.HandlerFunc {
 			if healthy {
 				status = "healthy"
 			}
-			pathInfo := "(no proxy path)"
-			if route.Path != "" {
-				pathInfo = "at " + route.Path
-			}
-			log.Printf("registered %s on port %d %s (%s)", route.Name, route.Port, pathInfo, status)
+			log.Printf("registered %s on port %d → https://%s.dev.kit (%s)", route.Name, route.Port, route.Name, status)
 		}()
 
 		w.WriteHeader(http.StatusOK)
@@ -222,7 +208,7 @@ func handleDeregister(state *State) http.HandlerFunc {
 	}
 }
 
-func handleDashboard(state *State, proxyPort string) http.HandlerFunc {
+func handleDashboard(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		routes := state.GetAll()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -243,6 +229,7 @@ func handleDashboard(state *State, proxyPort string) http.HandlerFunc {
     .healthy { color: #34a853; }
     .unhealthy { color: #ea4335; }
     .empty { text-align: center; padding: 40px; color: #666; }
+    .req-count { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -252,7 +239,7 @@ func handleDashboard(state *State, proxyPort string) http.HandlerFunc {
 			fmt.Fprint(w, `  <div class="empty">No tools registered.</div>`)
 		} else {
 			fmt.Fprint(w, `  <table>
-    <tr><th>Tool</th><th>Port</th><th>Proxy Path</th><th>Status</th><th>Last Checked</th></tr>
+    <tr><th>Tool</th><th>Port</th><th>URL</th><th>Status</th><th>Requests</th><th>Last Checked</th></tr>
 `)
 			for _, route := range routes {
 				status := `<span class="unhealthy">&#10008;</span>`
@@ -263,45 +250,32 @@ func handleDashboard(state *State, proxyPort string) http.HandlerFunc {
 				if !route.LastCheck.IsZero() {
 					lastCheck = route.LastCheck.Format("15:04:05")
 				}
-				var link, pathCol string
-				if route.Path != "" {
-					link = fmt.Sprintf("http://localhost:%s%s", proxyPort, route.Path)
-					pathCol = route.Path
-				} else {
-					link = fmt.Sprintf("http://localhost:%d", route.Port)
-					pathCol = "—"
-				}
-				fmt.Fprintf(w, "    <tr><td><a href=\"%s\">%s</a></td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-					link, route.Name, route.Port, pathCol, status, lastCheck)
+				reqs := atomic.LoadInt64(&route.Requests)
+				link := fmt.Sprintf("https://%s.dev.kit", route.Name)
+				fmt.Fprintf(w, "    <tr><td>%s</td><td>%d</td><td><a href=\"%s\">%s</a></td><td>%s</td><td class=\"req-count\">%d</td><td>%s</td></tr>\n",
+					route.Name, route.Port, link, link, status, reqs, lastCheck)
 			}
 			fmt.Fprint(w, "  </table>\n")
 		}
 
-		fmt.Fprintf(w, `
+		fmt.Fprint(w, `
   <h2>API</h2>
-  <p><strong>Register</strong> (with proxy routing):</p>
-  <pre>curl -X POST http://localhost:%s/proxy/register \
-  -d '{"name":"myapp", "port":8080, "path":"/myapp"}'</pre>
-  <p><strong>Register</strong> (health monitor only, no proxy routing):</p>
-  <pre>curl -X POST http://localhost:%s/proxy/register \
-  -d '{"name":"postgres", "port":5432}'</pre>
+  <p><strong>Register:</strong></p>
+  <pre>curl -X POST https://home.dev.kit/proxy/register \
+  -d '{"name":"myapp", "port":8080}'</pre>
   <p><strong>Deregister:</strong></p>
-  <pre>curl -X POST http://localhost:%s/proxy/deregister \
+  <pre>curl -X POST https://home.dev.kit/proxy/deregister \
   -d '{"name":"myapp"}'</pre>
-  <p><small><strong>name</strong> and <strong>port</strong> are required. <strong>path</strong> is optional — when provided, the proxy routes <code>localhost:%s/&lt;path&gt;/*</code> to <code>localhost:&lt;port&gt;/*</code>.</small></p>
-`, proxyPort, proxyPort, proxyPort, proxyPort)
+  <p><small><strong>name</strong> and <strong>port</strong> are required. The tool becomes available at <code>https://&lt;name&gt;.dev.kit</code>.</small></p>
+`)
 
 		fmt.Fprint(w, "</body>\n</html>\n")
 	}
 }
 
-func proxyHandler(state *State) http.HandlerFunc {
+func reverseProxy(route *Route) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		route := state.FindByPath(r.URL.Path)
-		if route == nil {
-			http.NotFound(w, r)
-			return
-		}
+		atomic.AddInt64(&route.Requests, 1)
 		target, err := url.Parse(fmt.Sprintf("http://localhost:%d", route.Port))
 		if err != nil {
 			http.Error(w, "bad upstream", http.StatusBadGateway)
@@ -311,16 +285,52 @@ func proxyHandler(state *State) http.HandlerFunc {
 		originalDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
 			originalDirector(req)
-			// Strip prefix by default; skip when StripPrefix is explicitly false
-			if route.StripPrefix == nil || *route.StripPrefix {
-				req.URL.Path = strings.TrimPrefix(req.URL.Path, route.Path)
-				if req.URL.Path == "" {
-					req.URL.Path = "/"
-				}
-			}
-			req.URL.RawPath = ""
+			req.Header.Set("X-Forwarded-Proto", "https")
+			req.Header.Set("X-Forwarded-Host", r.Host)
 		}
 		proxy.ServeHTTP(w, r)
+	}
+}
+
+func stripPort(host string) string {
+	if i := strings.LastIndex(host, ":"); i != -1 {
+		return host[:i]
+	}
+	return host
+}
+
+const devkitSuffix = ".dev.kit"
+const homeDomain = "home.dev.kit"
+
+func rootHandler(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host := stripPort(r.Host)
+
+		if host == homeDomain {
+			switch r.URL.Path {
+			case "/proxy/register":
+				handleRegister(state)(w, r)
+			case "/proxy/deregister":
+				handleDeregister(state)(w, r)
+			default:
+				handleDashboard(state)(w, r)
+			}
+			return
+		}
+
+		if !strings.HasSuffix(host, devkitSuffix) {
+			http.NotFound(w, r)
+			return
+		}
+
+		subdomain := strings.TrimSuffix(host, devkitSuffix)
+		route := state.FindByName(subdomain)
+		if route == nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		reverseProxy(route)(w, r)
 	}
 }
 
@@ -332,7 +342,9 @@ func envOr(key, fallback string) string {
 }
 
 func main() {
-	port := envOr("PROXY_PORT", "7001")
+	tlsPort := envOr("TLS_PORT", "7443")
+	certFile := envOr("TLS_CERT", "cert/_wildcard.dev.kit-cert.pem")
+	keyFile := envOr("TLS_KEY", "cert/_wildcard.dev.kit-key.pem")
 	stateFile := envOr("STATE_FILE", "state.json")
 	intervalStr := envOr("HEALTH_CHECK_INTERVAL", "5m")
 
@@ -346,21 +358,30 @@ func main() {
 	go runHealthChecker(state, interval)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/proxy/register", handleRegister(state))
-	mux.HandleFunc("/proxy/deregister", handleDeregister(state))
+	mux.HandleFunc("/", rootHandler(state))
 
-	// Catch-all handler: dashboard for root, proxy for everything else
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			handleDashboard(state, port)(w, r)
-			return
-		}
-		proxyHandler(state)(w, r)
-	})
+	srv := &http.Server{
+		Addr:    ":" + tlsPort,
+		Handler: mux,
+	}
 
-	addr := ":" + port
-	log.Printf("devkit proxy listening on http://localhost:%s", port)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	// Graceful shutdown on SIGTERM/SIGINT
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigCh
+		log.Printf("received %s — shutting down", sig)
+		state.mu.RLock()
+		state.persist()
+		state.mu.RUnlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
+	log.Printf("devkit proxy listening on https://home.dev.kit (:%s)", tlsPort)
+	if err := srv.ListenAndServeTLS(certFile, keyFile); err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
+	log.Printf("proxy stopped")
 }

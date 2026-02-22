@@ -34,7 +34,7 @@ up: build ## Start the proxy in the background
 		if kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
 			echo ""; \
 			echo "✅ devkit proxy is running"; \
-			echo "   Dashboard: http://localhost:$(PROXY_PORT)"; \
+			echo "   Dashboard: https://home.dev.kit"; \
 			echo "   PID: $$(cat $(PID_FILE))"; \
 		else \
 			echo "❌ Proxy failed to start"; \
@@ -62,7 +62,7 @@ status: ## Check if the proxy is running and show route table
 	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
 		echo "🟢 Proxy is running (PID $$(cat $(PID_FILE)))"; \
 		echo ""; \
-		curl -sf http://localhost:$(PROXY_PORT)/ | grep -o '<td>[^<]*</td>' | paste - - - - || true; \
+		curl -sf https://home.dev.kit/ | grep -o '<td>[^<]*</td>' | paste - - - - || true; \
 	else \
 		echo "🔴 Proxy is not running"; \
 	fi

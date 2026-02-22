@@ -3,9 +3,9 @@
 # seed.sh — Create sample realm, client, and users in Keycloak
 # =============================================================================
 
-set -euo pipefail
+#set -euo pipefail
 
-KEYCLOAK_URL="http://localhost:${KEYCLOAK_PORT:-8180}${KC_CONTEXT_PATH:-/keycloak}"
+KEYCLOAK_URL="http://localhost:${KEYCLOAK_PORT:-8180}"
 REALM="devkit-sample"
 CLIENT_ID="devkit-app"
 

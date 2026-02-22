@@ -38,24 +38,23 @@ make deploy
 
 ## Commands
 
-| Command                | Description                                         |
-|------------------------|-----------------------------------------------------|
-| `make up`              | Start all infrastructure (first run: full setup)    |
-| `make down`            | Stop all infrastructure                             |
-| `make restart`         | Restart all infrastructure                          |
-| `make logs`            | Tail all container logs                             |
-| `make logs S="webapp"` | Tail specific container(s)                          |
-| `make logs-magic-link` | Watch for magic login links                         |
-| `make status`          | Show container status + health check                |
-| `make login`           | Login CLI to local Trigger.dev instance              |
-| `make init PROJECT=x`  | Set project ref in trigger.config.ts                |
-| `make dev`             | Run trigger dev watcher                             |
-| `make deploy`          | Deploy tasks to local instance                      |
-| `make registry-login`  | Login to the local Docker registry                  |
-| `make upgrade`         | Upgrade to latest Trigger.dev release               |
-| `make worker-token`    | Show the worker token from logs                     |
-| `make clean`           | Stop infra, remove volumes (⚠️ destroys data)       |
-| `make nuke`            | Full wipe: containers, volumes, infra, caches (☢️)   |
+| Command                | Description                                                      |
+|------------------------|------------------------------------------------------------------|
+| `make help`            | Show this help                                                   |
+| `make up`              | Start everything (first run: clones infra + installs deps)       |
+| `make down`            | Stop all infrastructure                                          |
+| `make restart`         | Restart all infrastructure                                       |
+| `make logs`            | Tail container logs (all, or `S="webapp redis"` for specific)    |
+| `make logs-magic-link` | Watch for magic login links                                      |
+| `make status`          | Show container status + health check                             |
+| `make worker-token`    | Show worker token from logs                                      |
+| `make login`           | Login CLI to local Trigger.dev instance                          |
+| `make init PROJECT=x`  | Set project ref in trigger.config.ts                             |
+| `make dev`             | Run trigger dev watcher                                          |
+| `make deploy`          | Deploy tasks to local instance                                   |
+| `make registry-login`  | Login to local Docker registry                                   |
+| `make upgrade`         | Upgrade to latest Trigger.dev release                            |
+| `make clean`           | Remove containers, volumes, and local caches (optionally images) |
 
 ## Update Checks
 
