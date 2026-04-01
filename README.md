@@ -11,7 +11,7 @@ Each tool is a self-contained directory with its own `docker-compose.yml`, `Make
 | [trigger-dev](./trigger-dev/) | Trigger.dev v4 — background jobs, workflows, human-in-the-loop | ✅ |
 | [temporal](./temporal/) | Temporal — durable workflow orchestration with Go + TypeScript workers | ✅ |
 | [keycloak](./keycloak/) | Keycloak — identity and access management, OIDC/SAML provider | ✅ |
-| slurm | Slurm — HPC workload manager and job scheduler | 🔜 |
+
 
 ## Usage
 
